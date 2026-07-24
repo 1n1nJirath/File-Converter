@@ -3,21 +3,24 @@ from PIL import Image
 import fitz  # PyMuPDF
 import io
 import zipfile
+import tempfile
+import os
+from moviepy.editor import VideoFileClip
 
 # ตั้งค่าหน้าเว็บ
 st.set_page_config(page_title="Universal File Converter", layout="wide")
 st.title("🔄 โปรแกรมแปลงไฟล์ครอบจักรวาล")
-st.markdown("รองรับการแปลงไปมาระหว่าง: **PDF, JPG, PNG, WEBP**")
+st.markdown("รองรับการแปลงไปมาระหว่าง: **PDF, JPG, PNG, WEBP** และ **MP4 เป็น MP3**")
 
 # แบ่งหน้าจอเป็น 2 ฝั่ง
 col1, col2 = st.columns(2)
 
 with col1:
     st.header("📥 1. อัปโหลดไฟล์")
-    # เปิดโหมด accept_multiple_files=True เพื่อให้อัปโหลดได้หลายไฟล์พร้อมกัน
+    # เพิ่ม "mp4" เข้าไปในประเภทไฟล์ที่รองรับ
     uploaded_files = st.file_uploader(
         "ลากไฟล์มาวาง หรือคลิก 'Browse files' (เลือกได้หลายไฟล์พร้อมกัน)", 
-        type=["pdf", "jpg", "jpeg", "png", "webp"],
+        type=["pdf", "jpg", "jpeg", "png", "webp", "mp4"],
         accept_multiple_files=True
     )
 
@@ -25,7 +28,6 @@ with col2:
     st.header("📤 2. ผลลัพธ์และการแปลง")
     
     if uploaded_files:
-        # เช็คสกุลไฟล์ของทุกไฟล์ที่อัปโหลดเข้ามา
         file_types = [f.name.split('.')[-1].lower() for f in uploaded_files]
         
         # -----------------------------------------
@@ -34,14 +36,12 @@ with col2:
         if len(uploaded_files) > 1:
             st.info("💡 ตรวจพบว่าคุณอัปโหลดหลายไฟล์ ระบบจะรวมไฟล์เหล่านี้เป็น **PDF เดียว**")
             
-            # ตรวจสอบว่าทุกไฟล์เป็นรูปภาพหรือไม่
+            # ตรวจสอบว่าทุกไฟล์เป็นรูปภาพหรือไม่ (ไม่ให้เอาวิดีโอหรือ PDF มารวม)
             if all(ext in ['jpg', 'jpeg', 'png', 'webp'] for ext in file_types):
-                # สร้าง Dictionary เก็บไฟล์โดยมีชื่อและลำดับกำกับไว้
                 file_dict = {f"{i+1}. {f.name}": f for i, f in enumerate(uploaded_files)}
                 
-                st.markdown("**จัดเรียงลำดับหน้า PDF:** *(หากต้องการเปลี่ยนลำดับ ให้กากบาทไฟล์ที่ต้องการย้ายออก แล้วคลิกเลือกใหม่ ไฟล์นั้นจะไปต่อท้ายสุด)*")
+                st.markdown("**จัดเรียงลำดับหน้า PDF:** *(หากต้องการเปลี่ยนลำดับ ให้กากบาทไฟล์ที่ต้องการย้ายออก แล้วคลิกเลือกใหม่)*")
                 
-                # ใช้ Multiselect ให้ผู้ใช้จัดเรียงลำดับไฟล์เอง
                 ordered_names = st.multiselect(
                     "ลำดับไฟล์ที่จะรวม:", 
                     options=list(file_dict.keys()),
@@ -54,22 +54,18 @@ with col2:
                     else:
                         with st.spinner('กำลังประมวลผลและรวมไฟล์...'):
                             images = []
-                            # ดึงไฟล์มาเปิดตามลำดับที่ผู้ใช้เลือกในกล่อง Multiselect
                             for name in ordered_names:
                                 file_obj = file_dict[name]
                                 img = Image.open(file_obj)
                                 
-                                # PDF บังคับใช้โหมด RGB (ถ้าเป็น PNG โปร่งใสต้องแปลงก่อน)
                                 if img.mode in ("RGBA", "P"):
                                     img = img.convert("RGB")
                                 else:
                                     img = img.convert("RGB")
                                 images.append(img)
                             
-                            # เตรียมพื้นที่ Memory สำหรับบันทึก PDF
                             out_io = io.BytesIO()
                             
-                            # บันทึกรูปแรกเป็น PDF และแนบรูปที่เหลือต่อท้าย (append_images)
                             if len(images) == 1:
                                 images[0].save(out_io, format="PDF")
                             else:
@@ -85,7 +81,7 @@ with col2:
                                 mime="application/pdf"
                             )
             else:
-                st.error("❌ ฟีเจอร์รวมหลายไฟล์ รองรับเฉพาะการนำไฟล์รูปภาพ (JPG, PNG, WEBP) มารวมกันเท่านั้นครับ กรุณาเคลียร์ไฟล์ PDF ออกก่อน")
+                st.error("❌ ฟีเจอร์รวมหลายไฟล์ รองรับเฉพาะการนำไฟล์รูปภาพ (JPG, PNG, WEBP) มารวมกันเท่านั้นครับ กรุณาอัปโหลดใหม่ให้ถูกต้อง")
 
         # -----------------------------------------
         # กรณีที่ 2: อัปโหลดแค่ไฟล์เดียว (แปลงไฟล์ไปมาตามปกติ)
@@ -151,3 +147,44 @@ with col2:
                             file_name=f"{original_name}_images.zip",
                             mime="application/zip"
                         )
+                        
+            # --- แปลง MP4 เป็น MP3 ---
+            elif file_ext == 'mp4':
+                st.info("🎵 ระบบพร้อมสำหรับแยกเสียงจากวิดีโอ (สกัด MP4 เป็น MP3)")
+                
+                if st.button("✨ สกัดไฟล์เสียงเลย!"):
+                    with st.spinner('กำลังแยกเสียงจากวิดีโอ... อาจใช้เวลาสักครู่ขึ้นอยู่กับขนาดไฟล์'):
+                        try:
+                            # 1. บันทึกไฟล์ MP4 ต้นฉบับลง Temp file เพื่อให้ moviepy อ่านได้
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_mp4:
+                                temp_mp4.write(uploaded_file.read())
+                                mp4_path = temp_mp4.name
+                            
+                            mp3_path = mp4_path.replace(".mp4", ".mp3")
+                            
+                            # 2. ใช้ moviepy อ่านวิดีโอและเซฟเฉพาะเสียง
+                            video = VideoFileClip(mp4_path)
+                            video.audio.write_audiofile(mp3_path, logger=None) # logger=None ปิดการปริ้นท์ข้อความรกๆ
+                            video.close() # ปิดไฟล์วิดีโอ
+                            
+                            # 3. อ่านไฟล์เสียงกลับเข้ามาเป็น Bytes เพื่อทำปุ่มโหลด
+                            with open(mp3_path, "rb") as f:
+                                mp3_bytes = f.read()
+                                
+                            st.success("✅ สกัดไฟล์เสียงสำเร็จ!")
+                            st.download_button(
+                                label="⬇️ ดาวน์โหลดไฟล์ MP3",
+                                data=mp3_bytes,
+                                file_name=f"{original_name}.mp3",
+                                mime="audio/mpeg"
+                            )
+                            
+                        except Exception as e:
+                            st.error(f"❌ เกิดข้อผิดพลาดในการแปลงไฟล์: {e}")
+                            
+                        finally:
+                            # 4. ลบไฟล์ชั่วคราวทิ้งทุกครั้ง เพื่อไม่ให้เปลืองพื้นที่เซิร์ฟเวอร์
+                            if os.path.exists(mp4_path):
+                                os.remove(mp4_path)
+                            if os.path.exists(mp3_path):
+                                os.remove(mp3_path)
